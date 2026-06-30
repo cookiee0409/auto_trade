@@ -5,18 +5,19 @@ import { AUTH_COOKIE_NAME } from "@/lib/supabase/cookies";
 
 export { AUTH_COOKIE_NAME, AUTH_REFRESH_COOKIE_NAME } from "@/lib/supabase/cookies";
 
-function getSupabaseEnv() {
+function getSupabaseEnv(): { url: string; key: string } | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) {
-    throw new Error("Supabase environment variables are not configured.");
-  }
+  if (!url || !key) return null;
   return { url, key };
 }
 
 function createSupabaseClientWithToken(token: string | null) {
-  const { url, key } = getSupabaseEnv();
-  return createClient(url, key, {
+  const env = getSupabaseEnv();
+  if (!env) {
+    throw new Error("Supabase environment variables are not configured.");
+  }
+  return createClient(env.url, env.key, {
     global: {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     },
@@ -44,10 +45,21 @@ export function createServerSupabaseClient() {
 }
 
 export async function requireUser(request: NextRequest) {
-  const supabase = createRouteSupabaseClient(request);
   if (!getAccessTokenFromRequest(request)) {
-    return { supabase, user: null, error: "Unauthorized" };
+    return { supabase: null, user: null, error: "Unauthorized" };
   }
+
+  let supabase;
+  try {
+    supabase = createRouteSupabaseClient(request);
+  } catch (error) {
+    return {
+      supabase: null,
+      user: null,
+      error: error instanceof Error ? error.message : "Supabase is not configured."
+    };
+  }
+
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) {
     return { supabase, user: null, error: error?.message ?? "Unauthorized" };
@@ -56,7 +68,17 @@ export async function requireUser(request: NextRequest) {
 }
 
 export async function requireServerUser() {
-  const supabase = createServerSupabaseClient();
+  let supabase;
+  try {
+    supabase = createServerSupabaseClient();
+  } catch (error) {
+    return {
+      supabase: null,
+      user: null,
+      error: error instanceof Error ? error.message : "Supabase is not configured."
+    };
+  }
+
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) {
     return { supabase, user: null, error: error?.message ?? "Unauthorized" };
